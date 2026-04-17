@@ -6,6 +6,11 @@ __pycache__/
 .Python
 *.egg-info/
 .eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -17,16 +22,24 @@ ENV/
 .idea/
 *.swp
 *.swo
+.fleet/
 
 # Docker
 *.log
 docker-compose.override.yml
+*.pid
 
-# Secrets (НИКОГДА не коммить пароли!)
+# Secrets
 secrets/*.txt
 !secrets/.gitkeep
+.env
+.env.*
 
-# Reports (генерируются при тестах)
+# Reports
 reports/*.csv
 reports/*.png
 reports/*.txt
+
+# OS files
+.DS_Store
+Thumbs.db
