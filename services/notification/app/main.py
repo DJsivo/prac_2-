@@ -60,19 +60,7 @@ async def mark_as_read(
     return notification
 
 
-@app.post("/internal/order-created/http", status_code=status.HTTP_201_CREATED)
-async def internal_order_created_http(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
-    notification = _create_notification(payload, db)
-    return {"ok": True, "channel": "http", "notification_id": notification.id}
-
-
 @app.post("/internal/order-created/msgpack", status_code=status.HTTP_201_CREATED)
-async def internal_order_created_msgpack(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
+async def internal_order_created_transport(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
     notification = _create_notification(payload, db)
     return {"ok": True, "channel": "msgpack", "notification_id": notification.id}
-
-
-@app.post("/internal/order-created/grpc", status_code=status.HTTP_201_CREATED)
-async def internal_order_created_grpc(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
-    notification = _create_notification(payload, db)
-    return {"ok": True, "channel": "grpc", "notification_id": notification.id}
