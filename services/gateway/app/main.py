@@ -16,18 +16,8 @@ async def root():
     return {"status": "ok", "service": "gateway"}
 
 
-@app.get("/internal/ping/http")
-async def ping_http():
-    return {"ok": True, "transport": "http", "service": "gateway"}
-
-
-@app.get("/internal/ping/msgpack")
-async def ping_msgpack():
-    return {"ok": True, "transport": "msgpack", "service": "gateway"}
-
-
 @app.get("/internal/ping/grpc")
-async def ping_grpc():
+async def ping_transport():
     return {"ok": True, "transport": "grpc", "service": "gateway"}
 
 

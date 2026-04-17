@@ -104,3 +104,8 @@ python tests/performance_test.py --base-url http://localhost:8000 --path /api/or
 
 - Авторизация пока базовая (username/password + простой токен).
 - Внутренние интеграции (`http`, `msgpack`, `grpc`) показаны через отдельные API-контракты без полноценного брокера/настоящего gRPC-сервера.
+
+
+## Branch profile
+
+This branch keeps only GRPC transport endpoints for inter-service communication.

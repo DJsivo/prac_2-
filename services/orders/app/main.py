@@ -24,17 +24,10 @@ async def health():
     return {"alive": True}
 
 
-async def _ensure_user_exists(user_id: int, method: str) -> None:
-    auth_endpoint_by_method = {
-        "http": f"/internal/users/{user_id}/http",
-        "msgpack": f"/internal/users/{user_id}/msgpack",
-        "grpc": f"/internal/users/{user_id}/grpc",
-    }
-    auth_endpoint = auth_endpoint_by_method.get(method, f"/users/{user_id}")
-
+async def _ensure_user_exists(user_id: int) -> None:
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
-            response = await client.get(f"{AUTH_URL}{auth_endpoint}")
+            response = await client.get(f"{AUTH_URL}/internal/users/{user_id}/grpc")
         except httpx.TimeoutException as exc:
             raise HTTPException(status_code=504, detail=f"Auth service timeout: {exc}") from exc
         except httpx.RequestError as exc:
@@ -48,41 +41,26 @@ async def _ensure_user_exists(user_id: int, method: str) -> None:
         raise HTTPException(status_code=400, detail="Cannot validate user")
 
 
-async def _notify_about_order(order: models.Order, method: str) -> None:
+async def _notify_about_order(order: models.Order) -> None:
     payload = {
         "user_id": order.user_id,
         "order_id": order.id,
         "message": f"Order #{order.id} created with status '{order.status}'",
     }
 
-    endpoint_by_method = {
-        "http": "/internal/order-created/http",
-        "msgpack": "/internal/order-created/msgpack",
-        "grpc": "/internal/order-created/grpc",
-    }
-
-    endpoint = endpoint_by_method.get(method, endpoint_by_method["http"])
-    tracking_endpoint_by_method = {
-        "http": "/tracking/internal/order-created/http",
-        "msgpack": "/tracking/internal/order-created/msgpack",
-        "grpc": "/tracking/internal/order-created/grpc",
-    }
-    tracking_endpoint = tracking_endpoint_by_method.get(method, "/tracking/internal/order-created")
-
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
-            await client.post(f"{NOTIFICATION_URL}{endpoint}", json=payload)
+            await client.post(f"{NOTIFICATION_URL}/internal/order-created/grpc", json=payload)
             await client.post(
-                f"{TRACKING_URL}{tracking_endpoint}",
+                f"{TRACKING_URL}/tracking/internal/order-created/grpc",
                 json={"order_id": order.id},
             )
         except (httpx.RequestError, httpx.TimeoutException):
-            # For lab work we keep order creation successful even if side effects fail.
             return
 
 
 async def _create_order(order: schemas.OrderCreate, db: Session) -> models.Order:
-    await _ensure_user_exists(order.user_id, order.notify_method)
+    await _ensure_user_exists(order.user_id)
 
     db_order = models.Order(
         user_id=order.user_id,
@@ -93,7 +71,7 @@ async def _create_order(order: schemas.OrderCreate, db: Session) -> models.Order
     db.commit()
     db.refresh(db_order)
 
-    await _notify_about_order(db_order, order.notify_method)
+    await _notify_about_order(db_order)
     return db_order
 
 
@@ -102,18 +80,8 @@ async def create_order(order: schemas.OrderCreate, db: Session = Depends(databas
     return await _create_order(order, db)
 
 
-@app.post("/orders/http", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_http(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
-    return await _create_order(order.model_copy(update={"notify_method": "http"}), db)
-
-
-@app.post("/orders/msgpack", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_msgpack(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
-    return await _create_order(order.model_copy(update={"notify_method": "msgpack"}), db)
-
-
 @app.post("/orders/grpc", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_grpc(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+async def create_order_transport(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
     return await _create_order(order.model_copy(update={"notify_method": "grpc"}), db)
 
 
