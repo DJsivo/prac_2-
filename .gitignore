@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Secrets (НИКОГДА не коммить пароли!)
+secrets/*.txt
+!secrets/.gitkeep
+
+# Reports (генерируются при тестах)
+reports/*.csv
+reports/*.png
+reports/*.txt

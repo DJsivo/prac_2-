@@ -1,0 +1,155 @@
+services:
+  # ========================================
+  # PostgreSQL Database
+  # ========================================
+  postgres:
+    image: postgres:16
+    container_name: lab2_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: logistics
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - lab2_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ========================================
+  # API Gateway
+  # ========================================
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: lab2_gateway
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      AUTH_SERVICE_URL: http://auth:8001
+      ORDER_SERVICE_URL: http://orders:8002
+      TRACKING_SERVICE_URL: http://tracking:8003
+      NOTIFICATION_SERVICE_URL: http://notification:8004
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lab2_network
+    restart: unless-stopped
+
+  # ========================================
+  # Auth Service
+  # ========================================
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: lab2_auth
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: logistics
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres: 
+        condition: service_healthy
+    networks:
+      - lab2_network
+    restart: unless-stopped
+
+  # ========================================
+  # Order Service
+  # ========================================
+  orders:
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+    container_name: lab2_orders
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: logistics
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      AUTH_SERVICE_URL: http://auth:8001
+      NOTIFICATION_SERVICE_URL: http://notification:8004
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lab2_network
+    restart: unless-stopped
+
+  # ========================================
+  # Tracking Service
+  # ========================================
+  tracking:
+    build:
+      context: .
+      dockerfile: services/tracking/Dockerfile
+    container_name: lab2_tracking
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: logistics
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      ORDER_SERVICE_URL: http://orders:8002
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lab2_network
+    restart: unless-stopped
+
+  # ========================================
+  # Notification Service
+  # ========================================
+  notification:
+    build:
+      context: .
+      dockerfile: services/notification/Dockerfile
+    container_name: lab2_notification
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_NAME: logistics
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lab2_network
+    restart: unless-stopped
+
+networks:
+  lab2_network:
+    driver: bridge
+
+volumes:
+  pgdata:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
