@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class OrderCreate(BaseModel):
     user_id: int = Field(..., ge=1)
     total_amount: Decimal = Field(..., ge=0)
-    notify_method: Literal["http", "msgpack", "grpc"] = "http"
+    notify_method: Literal["http"] = "http"
 
 
 class OrderStatusUpdate(BaseModel):

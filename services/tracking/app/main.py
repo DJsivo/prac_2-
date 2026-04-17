@@ -70,13 +70,3 @@ async def init_tracking_for_order(payload: schemas.TrackingInitRequest, db: Sess
 @app.post("/tracking/internal/order-created/http", status_code=status.HTTP_201_CREATED)
 async def init_tracking_for_order_http(payload: schemas.TrackingInitRequest, db: Session = Depends(database.get_db)):
     return await init_tracking_for_order(payload, db)
-
-
-@app.post("/tracking/internal/order-created/msgpack", status_code=status.HTTP_201_CREATED)
-async def init_tracking_for_order_msgpack(payload: schemas.TrackingInitRequest, db: Session = Depends(database.get_db)):
-    return await init_tracking_for_order(payload, db)
-
-
-@app.post("/tracking/internal/order-created/grpc", status_code=status.HTTP_201_CREATED)
-async def init_tracking_for_order_grpc(payload: schemas.TrackingInitRequest, db: Session = Depends(database.get_db)):
-    return await init_tracking_for_order(payload, db)
