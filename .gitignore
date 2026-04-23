@@ -39,6 +39,9 @@ secrets/*.txt
 reports/*.csv
 reports/*.png
 reports/*.txt
+reports/**/*.csv
+reports/**/*.png
+reports/**/*.txt
 
 # OS files
 .DS_Store

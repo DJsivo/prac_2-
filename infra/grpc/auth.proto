@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc GetUser (GetUserRequest) returns (GetUserReply);
+}
+
+message GetUserRequest {
+  int32 user_id = 1;
+}
+
+message GetUserReply {
+  bool found = 1;
+  int32 id = 2;
+  string username = 3;
+  string email = 4;
+}

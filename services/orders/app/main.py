@@ -1,6 +1,9 @@
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
+import json
 import httpx
+import grpc
+import msgpack
 import os
 
 from . import database, models, schemas
@@ -8,8 +11,11 @@ from . import database, models, schemas
 app = FastAPI(title="Order Service", version="1.0.0")
 
 AUTH_URL = os.getenv("AUTH_SERVICE_URL", "http://auth:8001")
+AUTH_GRPC_URL = os.getenv("AUTH_GRPC_URL", "auth:50052")
 NOTIFICATION_URL = os.getenv("NOTIFICATION_SERVICE_URL", "http://notification:8004")
+NOTIFICATION_GRPC_URL = os.getenv("NOTIFICATION_GRPC_URL", "notification:50051")
 TRACKING_URL = os.getenv("TRACKING_SERVICE_URL", "http://tracking:8003")
+TRACKING_GRPC_URL = os.getenv("TRACKING_GRPC_URL", "tracking:50053")
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -25,27 +31,46 @@ async def health():
 
 
 async def _ensure_user_exists(user_id: int, method: str) -> None:
-    auth_endpoint_by_method = {
-        "http": f"/internal/users/{user_id}/http",
-        "msgpack": f"/internal/users/{user_id}/msgpack",
-        "grpc": f"/internal/users/{user_id}/grpc",
-    }
-    auth_endpoint = auth_endpoint_by_method.get(method, f"/users/{user_id}")
+    try:
+        if method == "grpc":
+            async with grpc.aio.insecure_channel(AUTH_GRPC_URL) as channel:
+                rpc = channel.unary_unary(
+                    "/auth.AuthService/GetUser",
+                    request_serializer=lambda data: json.dumps(data).encode("utf-8"),
+                    response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+                )
+                result = await rpc({"user_id": user_id}, timeout=5.0)
+                if not result.get("found", False):
+                    raise HTTPException(status_code=404, detail="User not found")
+                return
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        try:
-            response = await client.get(f"{AUTH_URL}{auth_endpoint}")
-        except httpx.TimeoutException as exc:
-            raise HTTPException(status_code=504, detail=f"Auth service timeout: {exc}") from exc
-        except httpx.RequestError as exc:
-            raise HTTPException(status_code=503, detail=f"Auth service unavailable: {exc}") from exc
+        auth_endpoint = f"/internal/users/{user_id}/http"
+        headers: dict[str, str] | None = None
 
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail="User not found")
-    if response.status_code >= 500:
-        raise HTTPException(status_code=503, detail="Auth service internal error")
-    if response.status_code >= 400:
-        raise HTTPException(status_code=400, detail="Cannot validate user")
+        if method == "msgpack":
+            auth_endpoint = f"/internal/users/{user_id}/msgpack"
+            headers = {"accept": "application/msgpack"}
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{AUTH_URL}{auth_endpoint}", headers=headers)
+
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found")
+        if response.status_code >= 500:
+            raise HTTPException(status_code=503, detail="Auth service internal error")
+        if response.status_code >= 400:
+            raise HTTPException(status_code=400, detail="Cannot validate user")
+
+        if method == "msgpack":
+            msgpack.unpackb(response.content, raw=False)
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail=f"Auth service timeout: {exc}") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Auth service unavailable: {exc}") from exc
+    except grpc.RpcError as exc:
+        raise HTTPException(status_code=503, detail=f"Auth gRPC unavailable: {exc}") from exc
+    except (msgpack.ExtraData, msgpack.FormatError, msgpack.StackError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=f"Auth msgpack invalid response: {exc}") from exc
 
 
 async def _notify_about_order(order: models.Order, method: str) -> None:
@@ -55,30 +80,53 @@ async def _notify_about_order(order: models.Order, method: str) -> None:
         "message": f"Order #{order.id} created with status '{order.status}'",
     }
 
-    endpoint_by_method = {
-        "http": "/internal/order-created/http",
-        "msgpack": "/internal/order-created/msgpack",
-        "grpc": "/internal/order-created/grpc",
-    }
-
-    endpoint = endpoint_by_method.get(method, endpoint_by_method["http"])
     tracking_endpoint_by_method = {
         "http": "/tracking/internal/order-created/http",
         "msgpack": "/tracking/internal/order-created/msgpack",
-        "grpc": "/tracking/internal/order-created/grpc",
     }
-    tracking_endpoint = tracking_endpoint_by_method.get(method, "/tracking/internal/order-created")
+    tracking_endpoint = tracking_endpoint_by_method.get(method, "/tracking/internal/order-created/http")
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        try:
-            await client.post(f"{NOTIFICATION_URL}{endpoint}", json=payload)
-            await client.post(
-                f"{TRACKING_URL}{tracking_endpoint}",
-                json={"order_id": order.id},
-            )
-        except (httpx.RequestError, httpx.TimeoutException):
-            # For lab work we keep order creation successful even if side effects fail.
-            return
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            if method == "msgpack":
+                raw_notification = msgpack.packb(payload, use_bin_type=True)
+                await client.post(
+                    f"{NOTIFICATION_URL}/internal/order-created/msgpack",
+                    content=raw_notification,
+                    headers={"content-type": "application/msgpack"},
+                )
+
+                raw_tracking = msgpack.packb({"order_id": order.id}, use_bin_type=True)
+                await client.post(
+                    f"{TRACKING_URL}{tracking_endpoint}",
+                    content=raw_tracking,
+                    headers={"content-type": "application/msgpack"},
+                )
+            elif method == "grpc":
+                async with grpc.aio.insecure_channel(NOTIFICATION_GRPC_URL) as channel:
+                    rpc = channel.unary_unary(
+                        "/notification.NotificationService/CreateOrderNotification",
+                        request_serializer=lambda data: json.dumps(data).encode("utf-8"),
+                        response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+                    )
+                    await rpc(payload, timeout=5.0)
+
+                async with grpc.aio.insecure_channel(TRACKING_GRPC_URL) as tracking_channel:
+                    tracking_rpc = tracking_channel.unary_unary(
+                        "/tracking.TrackingService/InitTrackingForOrder",
+                        request_serializer=lambda data: json.dumps(data).encode("utf-8"),
+                        response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+                    )
+                    await tracking_rpc({"order_id": order.id}, timeout=5.0)
+            else:
+                await client.post(f"{NOTIFICATION_URL}/internal/order-created/http", json=payload)
+                await client.post(
+                    f"{TRACKING_URL}{tracking_endpoint}",
+                    json={"order_id": order.id},
+                )
+    except (httpx.RequestError, httpx.TimeoutException, grpc.RpcError):
+        # For lab work we keep order creation successful even if side effects fail.
+        return
 
 
 async def _create_order(order: schemas.OrderCreate, db: Session) -> models.Order:

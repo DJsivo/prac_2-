@@ -1,106 +1,96 @@
-# Lab 2: Logistics Microservices
+﻿# Lab 2: Logistics Microservices
 
 Учебный проект по микросервисной архитектуре для темы "Логистика".
 
 ## Сервисы
 
-- `gateway` (порт `8000`) - единая точка входа.
-- `auth` (порт `8001`) - регистрация и логин пользователей.
-- `orders` (порт `8002`) - создание и управление заказами.
-- `tracking` (порт `8003`) - события отслеживания заказов.
-- `notification` (порт `8004`) - уведомления пользователю.
-- `postgres` (порт `5432`) - общая БД.
+- `gateway` (`8000`) — единая точка входа
+- `auth` (`8001`) — регистрация/логин, проверка пользователя
+- `orders` (`8002`) — создание и управление заказами
+- `tracking` (`8003`) — события отслеживания заказов
+- `notification` (`8004`) — уведомления
+- `postgres` (`5432`) — общая БД
 
-## Быстрый запуск
+## Транспорты межсервисного обмена
 
-```bash
-docker compose up --build
+- `HTTP`
+- `MessagePack` (по HTTP с `application/msgpack`)
+- `gRPC` (RPC-методы для `auth`, `tracking`, `notification`)
+
+Proto-файлы:
+- `infra/grpc/auth.proto`
+- `infra/grpc/tracking.proto`
+- `infra/grpc/notification.proto`
+
+## Пошаговая проверка
+
+### 1) Запуск
+
+```powershell
+docker compose up -d --build
+docker compose ps
 ```
 
-Проверка:
+### 2) Проверка доступности
 
-- `GET http://localhost:8000/`
-- `GET http://localhost:8000/api/auth/health`
-- `GET http://localhost:8000/api/orders/health`
-- `GET http://localhost:8000/api/tracking/health`
-- `GET http://localhost:8000/api/notifications/health`
-
-## Основные API
-
-Регистрация:
-
-```http
-POST /api/auth/register
-{
-  "username": "anna",
-  "email": "anna@example.com",
-  "password": "strongpass"
-}
+```powershell
+curl http://localhost:8000/
+curl http://localhost:8000/api/auth/health
+curl http://localhost:8000/api/orders/health
+curl http://localhost:8000/api/tracking/health
+curl http://localhost:8000/api/notifications/health
 ```
 
-Логин:
+### 3) Создать пользователя
 
-```http
-POST /api/auth/login
-{
-  "username": "anna",
-  "password": "strongpass"
-}
+```powershell
+$body = @{ username="demo_show"; email="demo_show@example.com"; password="strongpass123" } | ConvertTo-Json
+$u = Invoke-RestMethod -Uri "http://localhost:8000/api/auth/register" -Method Post -ContentType "application/json" -Body $body
+$uid = $u.id
+$uid
 ```
 
-Создание заказа (универсальный эндпоинт):
+### 4) Проверить 3 метода обмена
 
-```http
-POST /api/orders/orders
-{
-  "user_id": 1,
-  "total_amount": 2500.00,
-  "notify_method": "http"
-}
+```powershell
+$oHttp = Invoke-RestMethod -Uri "http://localhost:8000/api/orders/orders/http" -Method Post -ContentType "application/json" -Body (@{ user_id=$uid; total_amount=1000.00; notify_method="http" } | ConvertTo-Json)
+$oMsg  = Invoke-RestMethod -Uri "http://localhost:8000/api/orders/orders/msgpack" -Method Post -ContentType "application/json" -Body (@{ user_id=$uid; total_amount=2000.00; notify_method="msgpack" } | ConvertTo-Json)
+$oGrpc = Invoke-RestMethod -Uri "http://localhost:8000/api/orders/orders/grpc" -Method Post -ContentType "application/json" -Body (@{ user_id=$uid; total_amount=3000.00; notify_method="grpc" } | ConvertTo-Json)
+
+$oHttp
+$oMsg
+$oGrpc
 ```
 
-Создание заказа по отдельным эндпоинтам методов взаимодействия:
+### 5) Проверить побочные эффекты
 
-- `POST /api/orders/orders/http`
-- `POST /api/orders/orders/msgpack`
-- `POST /api/orders/orders/grpc`
-
-`notify_method` будет выбран автоматически по эндпоинту.
-
-Внутренние endpoint'ы с тремя методами в сервисах:
-
-- `auth`:  
-  `GET /api/auth/internal/users/{user_id}/http`  
-  `GET /api/auth/internal/users/{user_id}/msgpack`  
-  `GET /api/auth/internal/users/{user_id}/grpc`
-- `tracking`:  
-  `POST /api/tracking/tracking/internal/order-created/http`  
-  `POST /api/tracking/tracking/internal/order-created/msgpack`  
-  `POST /api/tracking/tracking/internal/order-created/grpc`
-- `notification`:  
-  `POST /api/notifications/internal/order-created/http`  
-  `POST /api/notifications/internal/order-created/msgpack`  
-  `POST /api/notifications/internal/order-created/grpc`
-- `gateway` (технические ping-ручки для демонстрации трех каналов):  
-  `GET /internal/ping/http`  
-  `GET /internal/ping/msgpack`  
-  `GET /internal/ping/grpc`
-
-## Кто с кем общается
-
-- Клиент -> `gateway` (HTTP).
-- `gateway` -> `auth`, `orders`, `tracking`, `notification` (проксирование HTTP).
-- `orders` -> `auth` (проверка пользователя) через внутренние endpoint'ы `http/msgpack/grpc`.
-- `orders` -> `notification` (создание уведомления) через внутренние endpoint'ы `http/msgpack/grpc`.
-- `orders` -> `tracking` (инициализация трекинга) через внутренние endpoint'ы `http/msgpack/grpc`.
-
-## Нагрузочная проверка
-
-```bash
-python tests/performance_test.py --base-url http://localhost:8000 --path /api/orders/orders --requests 200 --concurrency 20
+```powershell
+Invoke-RestMethod -Uri ("http://localhost:8000/api/notifications/notifications?user_id=" + $uid) -Method Get
+Invoke-RestMethod -Uri ("http://localhost:8000/api/tracking/tracking/order/" + $oGrpc.id) -Method Get
 ```
 
-## Что упрощено для учебной задачи
+### 6) Замер "одно сообщение"
 
-- Авторизация пока базовая (username/password + простой токен).
-- Внутренние интеграции (`http`, `msgpack`, `grpc`) показаны через отдельные API-контракты без полноценного брокера/настоящего gRPC-сервера.
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/run_one_message_benchmark.ps1
+```
+
+Показать последний отчёт:
+
+```powershell
+$last = Get-ChildItem reports/benchmarks | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$last.FullName
+Get-Content $last.FullName
+```
+
+### 7) Остановка
+
+```powershell
+docker compose down
+```
+
+## Дополнительные материалы
+
+- Таблица вызовов по сервисам: `APPENDIX_1_CALLS_RU.md`
+- Чек-лист демонстрации: `DEMO_CHECKLIST_RU.md`
+- Последние замеры: `reports/benchmarks/`

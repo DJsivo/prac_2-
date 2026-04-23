@@ -1,4 +1,10 @@
-from fastapi import Depends, FastAPI, HTTPException, status
+import asyncio
+import json
+import os
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+import grpc
+import msgpack
 from sqlalchemy.orm import Session
 
 from . import database, models, schemas
@@ -6,6 +12,9 @@ from . import database, models, schemas
 app = FastAPI(title="Notification Service", version="1.0.0")
 
 models.Base.metadata.create_all(bind=database.engine)
+GRPC_PORT = os.getenv("GRPC_PORT", "50051")
+grpc_server: grpc.aio.Server | None = None
+grpc_task: asyncio.Task | None = None
 
 
 @app.get("/")
@@ -29,6 +38,62 @@ def _create_notification(payload: schemas.NotificationCreate, db: Session) -> mo
     db.commit()
     db.refresh(db_notification)
     return db_notification
+
+
+def _decode_notification_payload_from_request(request: Request, body: bytes) -> schemas.NotificationCreate:
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/msgpack" in content_type:
+        data = msgpack.unpackb(body, raw=False)
+    else:
+        data = json.loads(body.decode("utf-8"))
+    return schemas.NotificationCreate(**data)
+
+
+async def _grpc_create_order_notification(payload: dict) -> dict:
+    db = database.SessionLocal()
+    try:
+        notification = _create_notification(schemas.NotificationCreate(**payload), db)
+        return {"ok": True, "channel": "grpc", "notification_id": notification.id}
+    finally:
+        db.close()
+
+
+async def _start_grpc_server() -> None:
+    global grpc_server
+
+    async def grpc_handler(payload: dict, context: grpc.aio.ServicerContext) -> dict:
+        return await _grpc_create_order_notification(payload)
+
+    handler = grpc.unary_unary_rpc_method_handler(
+        grpc_handler,
+        request_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+        response_serializer=lambda data: json.dumps(data).encode("utf-8"),
+    )
+    service = grpc.method_handlers_generic_handler(
+        "notification.NotificationService",
+        {"CreateOrderNotification": handler},
+    )
+
+    grpc_server = grpc.aio.server()
+    grpc_server.add_generic_rpc_handlers((service,))
+    grpc_server.add_insecure_port(f"[::]:{GRPC_PORT}")
+    await grpc_server.start()
+    await grpc_server.wait_for_termination()
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    global grpc_task
+    grpc_task = asyncio.create_task(_start_grpc_server())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    global grpc_server, grpc_task
+    if grpc_server is not None:
+        await grpc_server.stop(grace=1)
+    if grpc_task is not None:
+        grpc_task.cancel()
 
 
 @app.post("/notifications", response_model=schemas.NotificationResponse, status_code=status.HTTP_201_CREATED)
@@ -67,12 +132,9 @@ async def internal_order_created_http(payload: schemas.NotificationCreate, db: S
 
 
 @app.post("/internal/order-created/msgpack", status_code=status.HTTP_201_CREATED)
-async def internal_order_created_msgpack(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
+async def internal_order_created_msgpack(request: Request, db: Session = Depends(database.get_db)):
+    body = await request.body()
+    payload = _decode_notification_payload_from_request(request, body)
     notification = _create_notification(payload, db)
     return {"ok": True, "channel": "msgpack", "notification_id": notification.id}
 
-
-@app.post("/internal/order-created/grpc", status_code=status.HTTP_201_CREATED)
-async def internal_order_created_grpc(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
-    notification = _create_notification(payload, db)
-    return {"ok": True, "channel": "grpc", "notification_id": notification.id}

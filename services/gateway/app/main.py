@@ -21,16 +21,6 @@ async def ping_http():
     return {"ok": True, "transport": "http", "service": "gateway"}
 
 
-@app.get("/internal/ping/msgpack")
-async def ping_msgpack():
-    return {"ok": True, "transport": "msgpack", "service": "gateway"}
-
-
-@app.get("/internal/ping/grpc")
-async def ping_grpc():
-    return {"ok": True, "transport": "grpc", "service": "gateway"}
-
-
 def _forward_headers(request: Request) -> dict:
     return {
         key: value

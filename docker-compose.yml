@@ -62,6 +62,7 @@ services:
       DB_USER: postgres
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
+      AUTH_GRPC_PORT: "50052"
     secrets:
       - postgres_password
     depends_on:
@@ -86,7 +87,11 @@ services:
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
       AUTH_SERVICE_URL: http://auth:8001
+      AUTH_GRPC_URL: auth:50052
       NOTIFICATION_SERVICE_URL: http://notification:8004
+      NOTIFICATION_GRPC_URL: notification:50051
+      TRACKING_SERVICE_URL: http://tracking:8003
+      TRACKING_GRPC_URL: tracking:50053
     secrets:
       - postgres_password
     depends_on:
@@ -111,6 +116,7 @@ services:
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
       ORDER_SERVICE_URL: http://orders:8002
+      TRACKING_GRPC_PORT: "50053"
     secrets:
       - postgres_password
     depends_on:
@@ -134,6 +140,7 @@ services:
       DB_USER: postgres
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
+      GRPC_PORT: "50051"
     secrets:
       - postgres_password
     depends_on:

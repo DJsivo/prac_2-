@@ -5,8 +5,6 @@ import os
 
 def _read_password() -> str:
     password_file = os.getenv("DB_PASSWORD_FILE")
-    if not password_file:
-        return "postgres123"
 
     with open(password_file, "r", encoding="utf-8") as file:
         return file.read().strip()
@@ -30,4 +28,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package tracking;
+
+service TrackingService {
+  rpc InitTrackingForOrder (InitTrackingRequest) returns (InitTrackingReply);
+}
+
+message InitTrackingRequest {
+  int32 order_id = 1;
+}
+
+message InitTrackingReply {
+  bool ok = 1;
+  int32 tracking_id = 2;
+  string message = 3;
+}
