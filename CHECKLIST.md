@@ -121,6 +121,18 @@ $last.FullName
 Get-Content $last.FullName
 ```
 
+### Формальный замер для ЛР (100+ вызовов, средняя/дисперсия/график)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/run_full_chain_benchmark.ps1
+```
+
+Проверить, что созданы 3 файла:
+
+```powershell
+Get-ChildItem reports/performance_fullchain | Sort-Object LastWriteTime -Descending | Select-Object -First 3 Name,LastWriteTime,Length
+```
+
 ### Остановить
 
 ```powershell

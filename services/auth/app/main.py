@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
@@ -8,6 +7,7 @@ import msgpack
 from sqlalchemy.orm import Session
 import hashlib
 
+from common.grpc_generated import auth_pb2, auth_pb2_grpc
 from . import models, schemas, database
 
 app = FastAPI(title="Auth Service", version="1.0.0")
@@ -52,22 +52,20 @@ async def _grpc_get_user(payload: dict) -> dict:
 
 async def _start_grpc_server() -> None:
     global grpc_server
-
-    async def grpc_handler(payload: dict, context: grpc.aio.ServicerContext) -> dict:
-        return await _grpc_get_user(payload)
-
-    handler = grpc.unary_unary_rpc_method_handler(
-        grpc_handler,
-        request_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
-        response_serializer=lambda data: json.dumps(data).encode("utf-8"),
-    )
-    service = grpc.method_handlers_generic_handler(
-        "auth.AuthService",
-        {"GetUser": handler},
-    )
+    
+    class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
+        async def GetUser(self, request: auth_pb2.GetUserRequest, context: grpc.aio.ServicerContext):
+            payload = {"user_id": request.user_id}
+            data = await _grpc_get_user(payload)
+            return auth_pb2.GetUserReply(
+                found=data["found"],
+                id=data["id"],
+                username=data["username"],
+                email=data["email"],
+            )
 
     grpc_server = grpc.aio.server()
-    grpc_server.add_generic_rpc_handlers((service,))
+    auth_pb2_grpc.add_AuthServiceServicer_to_server(AuthServicer(), grpc_server)
     grpc_server.add_insecure_port(f"[::]:{AUTH_GRPC_PORT}")
     await grpc_server.start()
     await grpc_server.wait_for_termination()

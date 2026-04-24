@@ -123,7 +123,21 @@ $last.FullName
 Get-Content $last.FullName
 ```
 
-### 7) Остановка
+### 7) Формальный бенчмарк для ЛР (100+ вызовов, средняя/дисперсия/график)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/run_full_chain_benchmark.ps1
+```
+
+После запуска будут сохранены файлы:
+
+```text
+reports/performance_fullchain/full_chain_samples_YYYYMMDD_HHMMSS.csv
+reports/performance_fullchain/full_chain_summary_YYYYMMDD_HHMMSS.txt
+reports/performance_fullchain/full_chain_plot_YYYYMMDD_HHMMSS.png
+```
+
+### 8) Остановка
 
 ```powershell
 docker compose down
@@ -134,3 +148,4 @@ docker compose down
 - Таблица вызовов по сервисам: `APPENDIX_1_CALLS_RU.md`
 - Чек-лист демонстрации: `CHECKLIST.md`
 - Последние замеры: `reports/benchmarks/`
+- Формальные артефакты ЛР по производительности: `reports/performance_fullchain/`

@@ -26,3 +26,16 @@ powershell -ExecutionPolicy Bypass -File tests/run_one_message_benchmark.ps1
 ```text
 reports/benchmarks/one_message_YYYYMMDD_HHMMSS.txt
 ```
+
+## Формальный замер по требованиям ЛР (полная цепочка)
+
+Для требования "100+ вызовов, средняя, дисперсия, график" используй:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/run_full_chain_benchmark.ps1
+```
+
+Будут сохранены:
+- `reports/performance_fullchain/full_chain_samples_*.csv`
+- `reports/performance_fullchain/full_chain_summary_*.txt`
+- `reports/performance_fullchain/full_chain_plot_*.png`

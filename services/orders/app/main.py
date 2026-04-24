@@ -1,11 +1,11 @@
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
-import json
 import httpx
 import grpc
 import msgpack
 import os
 
+from common.grpc_generated import auth_pb2, auth_pb2_grpc, notification_pb2, notification_pb2_grpc, tracking_pb2, tracking_pb2_grpc
 from . import database, models, schemas
 
 app = FastAPI(title="Order Service", version="1.0.0")
@@ -34,13 +34,9 @@ async def _ensure_user_exists(user_id: int, method: str) -> None:
     try:
         if method == "grpc":
             async with grpc.aio.insecure_channel(AUTH_GRPC_URL) as channel:
-                rpc = channel.unary_unary(
-                    "/auth.AuthService/GetUser",
-                    request_serializer=lambda data: json.dumps(data).encode("utf-8"),
-                    response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
-                )
-                result = await rpc({"user_id": user_id}, timeout=5.0)
-                if not result.get("found", False):
+                stub = auth_pb2_grpc.AuthServiceStub(channel)
+                result = await stub.GetUser(auth_pb2.GetUserRequest(user_id=user_id), timeout=5.0)
+                if not result.found:
                     raise HTTPException(status_code=404, detail="User not found")
                 return
 
@@ -104,20 +100,22 @@ async def _notify_about_order(order: models.Order, method: str) -> None:
                 )
             elif method == "grpc":
                 async with grpc.aio.insecure_channel(NOTIFICATION_GRPC_URL) as channel:
-                    rpc = channel.unary_unary(
-                        "/notification.NotificationService/CreateOrderNotification",
-                        request_serializer=lambda data: json.dumps(data).encode("utf-8"),
-                        response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+                    stub = notification_pb2_grpc.NotificationServiceStub(channel)
+                    await stub.CreateOrderNotification(
+                        notification_pb2.NotificationRequest(
+                            user_id=payload["user_id"],
+                            order_id=payload["order_id"],
+                            message=payload["message"],
+                        ),
+                        timeout=5.0,
                     )
-                    await rpc(payload, timeout=5.0)
 
                 async with grpc.aio.insecure_channel(TRACKING_GRPC_URL) as tracking_channel:
-                    tracking_rpc = tracking_channel.unary_unary(
-                        "/tracking.TrackingService/InitTrackingForOrder",
-                        request_serializer=lambda data: json.dumps(data).encode("utf-8"),
-                        response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
+                    tracking_stub = tracking_pb2_grpc.TrackingServiceStub(tracking_channel)
+                    await tracking_stub.InitTrackingForOrder(
+                        tracking_pb2.InitTrackingRequest(order_id=order.id),
+                        timeout=5.0,
                     )
-                    await tracking_rpc({"order_id": order.id}, timeout=5.0)
             else:
                 await client.post(f"{NOTIFICATION_URL}/internal/order-created/http", json=payload)
                 await client.post(

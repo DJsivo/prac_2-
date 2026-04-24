@@ -8,3 +8,5 @@ python-multipart==0.0.9
 email-validator==2.1.1
 msgpack==1.0.8
 grpcio==1.66.2
+grpcio-tools==1.66.2
+matplotlib==3.9.2

@@ -7,6 +7,7 @@ import grpc
 import msgpack
 from sqlalchemy.orm import Session
 
+from common.grpc_generated import notification_pb2, notification_pb2_grpc
 from . import database, models, schemas
 
 app = FastAPI(title="Notification Service", version="1.0.0")
@@ -60,22 +61,27 @@ async def _grpc_create_order_notification(payload: dict) -> dict:
 
 async def _start_grpc_server() -> None:
     global grpc_server
-
-    async def grpc_handler(payload: dict, context: grpc.aio.ServicerContext) -> dict:
-        return await _grpc_create_order_notification(payload)
-
-    handler = grpc.unary_unary_rpc_method_handler(
-        grpc_handler,
-        request_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
-        response_serializer=lambda data: json.dumps(data).encode("utf-8"),
-    )
-    service = grpc.method_handlers_generic_handler(
-        "notification.NotificationService",
-        {"CreateOrderNotification": handler},
-    )
+    
+    class NotificationServicer(notification_pb2_grpc.NotificationServiceServicer):
+        async def CreateOrderNotification(
+            self,
+            request: notification_pb2.NotificationRequest,
+            context: grpc.aio.ServicerContext,
+        ):
+            payload = {
+                "user_id": request.user_id,
+                "order_id": request.order_id,
+                "message": request.message,
+            }
+            data = await _grpc_create_order_notification(payload)
+            return notification_pb2.NotificationReply(
+                ok=data["ok"],
+                channel=data["channel"],
+                notification_id=data["notification_id"],
+            )
 
     grpc_server = grpc.aio.server()
-    grpc_server.add_generic_rpc_handlers((service,))
+    notification_pb2_grpc.add_NotificationServiceServicer_to_server(NotificationServicer(), grpc_server)
     grpc_server.add_insecure_port(f"[::]:{GRPC_PORT}")
     await grpc_server.start()
     await grpc_server.wait_for_termination()
@@ -137,4 +143,3 @@ async def internal_order_created_msgpack(request: Request, db: Session = Depends
     payload = _decode_notification_payload_from_request(request, body)
     notification = _create_notification(payload, db)
     return {"ok": True, "channel": "msgpack", "notification_id": notification.id}
-

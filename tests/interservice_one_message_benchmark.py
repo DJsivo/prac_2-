@@ -1,5 +1,4 @@
 import argparse
-import json
 import statistics
 import time
 from dataclasses import dataclass
@@ -7,6 +6,8 @@ from dataclasses import dataclass
 import grpc
 import httpx
 import msgpack
+
+from common.grpc_generated import notification_pb2, notification_pb2_grpc
 
 
 @dataclass
@@ -49,7 +50,14 @@ def send_one(
 
     if method == "grpc":
         started = time.perf_counter()
-        grpc_rpc(payload, timeout=5.0)
+        grpc_rpc(
+            notification_pb2.NotificationRequest(
+                user_id=payload["user_id"],
+                order_id=payload["order_id"] or 0,
+                message=payload["message"],
+            ),
+            timeout=5.0,
+        )
         return (time.perf_counter() - started) * 1000
 
     url = f"{base_url.rstrip('/')}/internal/order-created/{method}"
@@ -81,11 +89,8 @@ def run_benchmark(
 
     with httpx.Client(timeout=timeout) as client:
         with grpc.insecure_channel(grpc_url) as grpc_channel:
-            grpc_rpc = grpc_channel.unary_unary(
-                "/notification.NotificationService/CreateOrderNotification",
-                request_serializer=lambda data: json.dumps(data).encode("utf-8"),
-                response_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
-            )
+            grpc_stub = notification_pb2_grpc.NotificationServiceStub(grpc_channel)
+            grpc_rpc = grpc_stub.CreateOrderNotification
 
             message_seq = 1
             for method in methods:

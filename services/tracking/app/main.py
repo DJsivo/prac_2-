@@ -7,6 +7,7 @@ import grpc
 import msgpack
 from sqlalchemy.orm import Session
 
+from common.grpc_generated import tracking_pb2, tracking_pb2_grpc
 from . import database, models, schemas
 
 app = FastAPI(title="Tracking Service", version="1.0.0")
@@ -63,22 +64,22 @@ async def _grpc_init_tracking(payload: dict) -> dict:
 
 async def _start_grpc_server() -> None:
     global grpc_server
-
-    async def grpc_handler(payload: dict, context: grpc.aio.ServicerContext) -> dict:
-        return await _grpc_init_tracking(payload)
-
-    handler = grpc.unary_unary_rpc_method_handler(
-        grpc_handler,
-        request_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
-        response_serializer=lambda data: json.dumps(data).encode("utf-8"),
-    )
-    service = grpc.method_handlers_generic_handler(
-        "tracking.TrackingService",
-        {"InitTrackingForOrder": handler},
-    )
+    
+    class TrackingServicer(tracking_pb2_grpc.TrackingServiceServicer):
+        async def InitTrackingForOrder(
+            self,
+            request: tracking_pb2.InitTrackingRequest,
+            context: grpc.aio.ServicerContext,
+        ):
+            data = await _grpc_init_tracking({"order_id": request.order_id})
+            return tracking_pb2.InitTrackingReply(
+                ok=data["ok"],
+                tracking_id=data["tracking_id"],
+                message=data["message"],
+            )
 
     grpc_server = grpc.aio.server()
-    grpc_server.add_generic_rpc_handlers((service,))
+    tracking_pb2_grpc.add_TrackingServiceServicer_to_server(TrackingServicer(), grpc_server)
     grpc_server.add_insecure_port(f"[::]:{TRACKING_GRPC_PORT}")
     await grpc_server.start()
     await grpc_server.wait_for_termination()
