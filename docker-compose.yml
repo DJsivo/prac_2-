@@ -40,7 +40,7 @@ services:
       TRACKING_SERVICE_URL: http://tracking:8003
       NOTIFICATION_SERVICE_URL: http://notification:8004
     ports:
-      - "8000:8000"
+      - "${GATEWAY_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,9 +62,19 @@ services:
       DB_USER: postgres
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
-      AUTH_GRPC_PORT: "50052"
+      AUTH_GRPC_PORT: "${AUTH_GRPC_PORT:-50052}"
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ISSUER: "${JWT_ISSUER:-lab2-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-lab2-services}"
+      JWT_EXPIRES_MINUTES: "${JWT_EXPIRES_MINUTES:-60}"
+      GITHUB_CALLBACK_URL: "${GITHUB_CALLBACK_URL:-http://localhost:8000/auth/oauth/github/callback}"
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      DEFAULT_ADMIN_EMAIL: "${DEFAULT_ADMIN_EMAIL:-admin@example.com}"
+      DEFAULT_ADMIN_PASSWORD: "${DEFAULT_ADMIN_PASSWORD:-strongpass123}"
     secrets:
       - postgres_password
+      - jwt_secret
     depends_on:
       postgres: 
         condition: service_healthy
@@ -89,11 +99,15 @@ services:
       AUTH_SERVICE_URL: http://auth:8001
       AUTH_GRPC_URL: auth:50052
       NOTIFICATION_SERVICE_URL: http://notification:8004
-      NOTIFICATION_GRPC_URL: notification:50051
+      NOTIFICATION_GRPC_URL: "notification:${NOTIFICATION_GRPC_PORT:-50051}"
       TRACKING_SERVICE_URL: http://tracking:8003
-      TRACKING_GRPC_URL: tracking:50053
+      TRACKING_GRPC_URL: "tracking:${TRACKING_GRPC_PORT:-50053}"
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ISSUER: "${JWT_ISSUER:-lab2-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-lab2-services}"
     secrets:
       - postgres_password
+      - jwt_secret
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,9 +130,13 @@ services:
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
       ORDER_SERVICE_URL: http://orders:8002
-      TRACKING_GRPC_PORT: "50053"
+      TRACKING_GRPC_PORT: "${TRACKING_GRPC_PORT:-50053}"
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ISSUER: "${JWT_ISSUER:-lab2-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-lab2-services}"
     secrets:
       - postgres_password
+      - jwt_secret
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,9 +158,13 @@ services:
       DB_USER: postgres
       DB_NAME: logistics
       DB_PASSWORD_FILE: /run/secrets/postgres_password
-      GRPC_PORT: "50051"
+      GRPC_PORT: "${NOTIFICATION_GRPC_PORT:-50051}"
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ISSUER: "${JWT_ISSUER:-lab2-auth}"
+      JWT_AUDIENCE: "${JWT_AUDIENCE:-lab2-services}"
     secrets:
       - postgres_password
+      - jwt_secret
     depends_on:
       postgres:
         condition: service_healthy
@@ -160,3 +182,5 @@ volumes:
 secrets:
   postgres_password:
     file: ./secrets/postgres_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt

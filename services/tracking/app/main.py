@@ -7,6 +7,7 @@ import grpc
 import msgpack
 from sqlalchemy.orm import Session
 
+from common.common.auth import get_current_principal, require_roles, UserPrincipal
 from common.grpc_generated import tracking_pb2, tracking_pb2_grpc
 from . import database, models, schemas
 
@@ -101,7 +102,11 @@ async def on_shutdown() -> None:
 
 
 @app.get("/tracking/order/{order_id}", response_model=list[schemas.TrackingResponse])
-async def get_order_tracking(order_id: int, db: Session = Depends(database.get_db)):
+async def get_order_tracking(
+    order_id: int,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(get_current_principal),
+):
     return (
         db.query(models.TrackingEvent)
         .filter(models.TrackingEvent.order_id == order_id)
@@ -115,6 +120,7 @@ async def create_tracking_event(
     order_id: int,
     payload: schemas.TrackingCreate,
     db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("admin")),
 ):
     event = models.TrackingEvent(
         order_id=order_id,

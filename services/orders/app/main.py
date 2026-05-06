@@ -1,10 +1,12 @@
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import httpx
 import grpc
 import msgpack
 import os
 
+from common.common.auth import get_current_principal, require_roles, UserPrincipal
 from common.grpc_generated import auth_pb2, auth_pb2_grpc, notification_pb2, notification_pb2_grpc, tracking_pb2, tracking_pb2_grpc
 from . import database, models, schemas
 
@@ -143,36 +145,83 @@ async def _create_order(order: schemas.OrderCreate, db: Session) -> models.Order
     return db_order
 
 
+def _get_order_or_404(order_id: int, db: Session) -> models.Order:
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order
+
+
+def _ensure_order_access(order: models.Order, principal: UserPrincipal) -> None:
+    if principal.role == "admin":
+        return
+    if order.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
 @app.post("/orders", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+async def create_order(
+    order: schemas.OrderCreate,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("user", "admin")),
+):
+    if principal.role != "admin" and order.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Users can create orders only for themselves")
     return await _create_order(order, db)
 
 
 @app.post("/orders/http", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_http(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+async def create_order_http(
+    order: schemas.OrderCreate,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("user", "admin")),
+):
+    if principal.role != "admin" and order.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Users can create orders only for themselves")
     return await _create_order(order.model_copy(update={"notify_method": "http"}), db)
 
 
 @app.post("/orders/msgpack", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_msgpack(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+async def create_order_msgpack(
+    order: schemas.OrderCreate,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("user", "admin")),
+):
+    if principal.role != "admin" and order.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Users can create orders only for themselves")
     return await _create_order(order.model_copy(update={"notify_method": "msgpack"}), db)
 
 
 @app.post("/orders/grpc", response_model=schemas.OrderResponse, status_code=status.HTTP_201_CREATED)
-async def create_order_grpc(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
+async def create_order_grpc(
+    order: schemas.OrderCreate,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("user", "admin")),
+):
+    if principal.role != "admin" and order.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Users can create orders only for themselves")
     return await _create_order(order.model_copy(update={"notify_method": "grpc"}), db)
 
 
 @app.get("/orders", response_model=list[schemas.OrderResponse])
-async def list_orders(db: Session = Depends(database.get_db)):
-    return db.query(models.Order).order_by(models.Order.id.desc()).all()
+async def list_orders(
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(get_current_principal),
+):
+    query = db.query(models.Order)
+    if principal.role != "admin":
+        query = query.filter(models.Order.user_id == principal.user_id)
+    return query.order_by(models.Order.id.desc()).all()
 
 
 @app.get("/orders/{order_id}", response_model=schemas.OrderResponse)
-async def get_order(order_id: int, db: Session = Depends(database.get_db)):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+async def get_order(
+    order_id: int,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(get_current_principal),
+):
+    order = _get_order_or_404(order_id, db)
+    _ensure_order_access(order, principal)
     return order
 
 
@@ -181,12 +230,31 @@ async def update_order_status(
     order_id: int,
     update: schemas.OrderStatusUpdate,
     db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("admin")),
 ):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    order = _get_order_or_404(order_id, db)
 
     order.status = update.status
     db.commit()
     db.refresh(order)
     return order
+
+
+@app.get("/metrics")
+async def get_metrics(
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("admin")),
+):
+    total_orders = db.query(func.count(models.Order.id)).scalar() or 0
+    total_revenue = db.query(func.coalesce(func.sum(models.Order.total_amount), 0)).scalar() or 0
+    status_rows = (
+        db.query(models.Order.status, func.count(models.Order.id))
+        .group_by(models.Order.status)
+        .order_by(models.Order.status.asc())
+        .all()
+    )
+    return {
+        "total_orders": int(total_orders),
+        "total_revenue": float(total_revenue),
+        "orders_by_status": {status_name: int(count) for status_name, count in status_rows},
+    }

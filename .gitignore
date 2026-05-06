@@ -34,6 +34,13 @@ secrets/*.txt
 !secrets/.gitkeep
 .env
 .env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.secret
+*.secrets
 
 # Reports
 reports/*.csv

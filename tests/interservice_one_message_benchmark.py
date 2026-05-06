@@ -2,10 +2,16 @@ import argparse
 import statistics
 import time
 from dataclasses import dataclass
+from pathlib import Path
+import sys
 
 import grpc
 import httpx
 import msgpack
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from common.grpc_generated import notification_pb2, notification_pb2_grpc
 
@@ -44,7 +50,7 @@ def send_one(
 ) -> float:
     payload: dict = {
         "user_id": user_id,
-        "order_id": None,
+        "order_id": message_seq,
         "message": f"bench message #{message_seq}",
     }
 
@@ -53,7 +59,7 @@ def send_one(
         grpc_rpc(
             notification_pb2.NotificationRequest(
                 user_id=payload["user_id"],
-                order_id=payload["order_id"] or 0,
+                order_id=payload["order_id"],
                 message=payload["message"],
             ),
             timeout=5.0,

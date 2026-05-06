@@ -46,25 +46,37 @@ async def proxy_request(base_url: str, endpoint: str, request: Request, service_
             raise HTTPException(status_code=503, detail=f"{service_name} unavailable: {exc}") from exc
 
     content_type = resp.headers.get("content-type", "")
+    response_headers = {
+        key: value
+        for key, value in resp.headers.items()
+        if key.lower() not in {"content-length", "transfer-encoding", "connection", "content-encoding"}
+    }
     if "application/json" in content_type:
         try:
-            return JSONResponse(status_code=resp.status_code, content=resp.json())
+            return JSONResponse(status_code=resp.status_code, content=resp.json(), headers=response_headers)
         except ValueError:
             return Response(
                 status_code=resp.status_code,
                 content=resp.text,
                 media_type="text/plain",
+                headers=response_headers,
             )
 
     return Response(
         status_code=resp.status_code,
         content=resp.content,
         media_type=content_type or None,
+        headers=response_headers,
     )
 
 
 @app.api_route("/api/auth/{endpoint:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def auth_proxy(endpoint: str, request: Request):
+    return await proxy_request(AUTH_URL, endpoint, request, "Auth service")
+
+
+@app.api_route("/auth/{endpoint:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def auth_proxy_short(endpoint: str, request: Request):
     return await proxy_request(AUTH_URL, endpoint, request, "Auth service")
 
 

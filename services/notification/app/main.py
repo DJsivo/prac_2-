@@ -7,6 +7,7 @@ import grpc
 import msgpack
 from sqlalchemy.orm import Session
 
+from common.common.auth import get_current_principal, require_roles, UserPrincipal
 from common.grpc_generated import notification_pb2, notification_pb2_grpc
 from . import database, models, schemas
 
@@ -103,16 +104,36 @@ async def on_shutdown() -> None:
 
 
 @app.post("/notifications", response_model=schemas.NotificationResponse, status_code=status.HTTP_201_CREATED)
-async def create_notification(payload: schemas.NotificationCreate, db: Session = Depends(database.get_db)):
+async def create_notification(
+    payload: schemas.NotificationCreate,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(require_roles("admin")),
+):
     return _create_notification(payload, db)
 
 
 @app.get("/notifications", response_model=list[schemas.NotificationResponse])
-async def list_notifications(user_id: int | None = None, db: Session = Depends(database.get_db)):
+async def list_notifications(
+    user_id: int | None = None,
+    db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(get_current_principal),
+):
     query = db.query(models.Notification)
-    if user_id is not None:
-        query = query.filter(models.Notification.user_id == user_id)
+    if principal.role == "admin":
+        if user_id is not None:
+            query = query.filter(models.Notification.user_id == user_id)
+    else:
+        query = query.filter(models.Notification.user_id == principal.user_id)
+        if user_id is not None and user_id != principal.user_id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
     return query.order_by(models.Notification.created_at.desc()).all()
+
+
+def _get_notification_or_404(notification_id: int, db: Session) -> models.Notification:
+    notification = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return notification
 
 
 @app.patch("/notifications/{notification_id}/read", response_model=schemas.NotificationResponse)
@@ -120,10 +141,11 @@ async def mark_as_read(
     notification_id: int,
     payload: schemas.NotificationReadUpdate,
     db: Session = Depends(database.get_db),
+    principal: UserPrincipal = Depends(get_current_principal),
 ):
-    notification = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
-    if not notification:
-        raise HTTPException(status_code=404, detail="Notification not found")
+    notification = _get_notification_or_404(notification_id, db)
+    if principal.role != "admin" and notification.user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     notification.is_read = payload.is_read
     db.commit()

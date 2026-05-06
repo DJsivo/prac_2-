@@ -4,10 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import statistics
+import sys
 import time
 
 import httpx
 import matplotlib.pyplot as plt
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 
 @dataclass
@@ -18,11 +23,11 @@ class Sample:
     order_id: int
 
 
-def ensure_test_user(base_url: str, username: str, email: str, password: str, timeout: float) -> int:
-    register_payload = {"username": username, "email": email, "password": password}
-    login_payload = {"username": username, "password": password}
+def ensure_test_user(base_url: str, email: str, password: str, timeout: float) -> tuple[int, str]:
+    register_payload = {"email": email, "password": password}
+    login_payload = {"email": email, "password": password}
 
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, trust_env=False) as client:
         # Wait for gateway/auth readiness (retries for fresh docker start).
         for _ in range(30):
             try:
@@ -38,7 +43,13 @@ def ensure_test_user(base_url: str, username: str, email: str, password: str, ti
             try:
                 response = client.post(f"{base_url}/api/auth/register", json=register_payload)
                 if response.status_code == 201:
-                    return int(response.json()["id"])
+                    token = response.json()["access_token"]
+                    me = client.get(
+                        f"{base_url}/api/auth/me",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    me.raise_for_status()
+                    return int(me.json()["user_id"]), token
                 if response.status_code < 500:
                     break
             except httpx.RequestError:
@@ -62,38 +73,36 @@ def ensure_test_user(base_url: str, username: str, email: str, password: str, ti
         if login is None:
             raise RuntimeError("Auth service did not respond for login")
         login.raise_for_status()
-
-        # For lab project: quickly resolve user id by scanning.
-        for user_id in range(1, 5000):
-            try:
-                user_resp = client.get(f"{base_url}/api/auth/users/{user_id}")
-                if user_resp.status_code == 200 and user_resp.json().get("username") == username:
-                    return user_id
-            except httpx.RequestError:
-                continue
-
-    raise RuntimeError(f"Could not resolve user id for username={username}")
+        token = login.json()["access_token"]
+        me = client.get(
+            f"{base_url}/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        me.raise_for_status()
+        return int(me.json()["user_id"]), token
 
 
 def run_one_method(
     base_url: str,
     method: str,
     user_id: int,
+    access_token: str,
     runs: int,
     warmup: int,
     timeout: float,
 ) -> list[Sample]:
     samples: list[Sample] = []
     endpoint = f"{base_url}/api/orders/orders/{method}"
+    headers = {"Authorization": f"Bearer {access_token}"}
 
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, trust_env=False) as client:
         for idx in range(1, warmup + 1):
             payload = {
                 "user_id": user_id,
                 "total_amount": float(100 + idx),
                 "notify_method": method,
             }
-            _ = client.post(endpoint, json=payload)
+            _ = client.post(endpoint, json=payload, headers=headers)
 
         for run_no in range(1, runs + 1):
             payload = {
@@ -102,7 +111,7 @@ def run_one_method(
                 "notify_method": method,
             }
             started = time.perf_counter()
-            response = client.post(endpoint, json=payload)
+            response = client.post(endpoint, json=payload, headers=headers)
             elapsed_ms = (time.perf_counter() - started) * 1000
             response.raise_for_status()
             order_id = int(response.json()["id"])
@@ -177,7 +186,6 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=100)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=8.0)
-    parser.add_argument("--username", default="demo_show")
     parser.add_argument("--email", default="demo_show@example.com")
     parser.add_argument("--password", default="strongpass123")
     parser.add_argument("--out-dir", default="reports/performance_fullchain")
@@ -192,7 +200,7 @@ def main() -> None:
     out_summary = out_dir / f"full_chain_summary_{ts}.txt"
     out_png = out_dir / f"full_chain_plot_{ts}.png"
 
-    user_id = ensure_test_user(args.base_url, args.username, args.email, args.password, args.timeout)
+    user_id, access_token = ensure_test_user(args.base_url, args.email, args.password, args.timeout)
     all_samples: list[Sample] = []
     for method in ["http", "msgpack", "grpc"]:
         all_samples.extend(
@@ -200,6 +208,7 @@ def main() -> None:
                 base_url=args.base_url,
                 method=method,
                 user_id=user_id,
+                access_token=access_token,
                 runs=args.runs,
                 warmup=args.warmup,
                 timeout=args.timeout,
